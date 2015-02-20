@@ -1,0 +1,595 @@
+<?php
+/*
+Hack Name: Wordpress Theme Zip
+Plugin URI: http://planetozh.com/blog/my-projects/wordpress-theme-zip/
+Description: Generate on the fly a zip file with correct path names from a theme directory (including subdirectories)
+Version: 1.0
+Author: Ozh
+Author URI: http://planetOzh.com
+*/
+
+/**************************************
+ * Edit the settings below :          *
+ **************************************/
+
+// Theme Options
+ 
+$ziptheme['theme_name'] = 'my-neat-theme';
+	/* Theme directory you want to zip
+	 * This must be a subdirectory of wp-content/themes/
+	 * No leading or trailing slash */
+	 
+$ziptheme['theme_page'] = 'http://yourblog.com/wp-themes/neat/';
+	/* Theme download page (or any page where user can easily find
+	 * their way through your site) */
+
+
+// Theme Zip Options
+	 
+$ziptheme['datesuffix'] = 'Ymd';
+	/* Optionnal suffix for generated zipfile, taken from the newest file modification date.
+	 * Set to empty string '' to append no suffix to your filename.
+	 * Syntax is the same as PHP function date() (http://www.php.net/date)
+	 * Example of generated zip filename for theme_name "classic"
+	 * - suffix 'Ymd' : "classic-20051222.zip"
+	 * - suffix 'Y-m-d-H-i-s' : "classic-2005-12-22-033455.zip"
+	 * - suffix '\a\l\p\h\aY' : "classic-alpha2005.zip"
+	 * - no suffix : "classic.zip" */
+
+
+// General Setup-Once-Then-Forget Options
+	 
+$ziptheme['path_to_zipclass'] = '/home/you/zipfile/ss_zip.class.php';
+	/* Path to your local installation of "PHPZIP class" (c) smiledsoft.com
+	 * Download it from : http://smiledsoft.com/demos/phpzip/buy.shtml
+	 * (get the free version) */
+
+$ziptheme['rootdir'] = '/home/you/wordpress/wp-content/themes';
+	/* Your Wordpress theme physical directory, usually something like :
+	 * /home/you/wp-content/themes
+	 * No trailing slash please */
+	 
+$ziptheme['rooturl'] = 'http://yourblog.com/wordpress';
+	/* Your Wordpress root URL, usually something like
+	 * http://site.com/wordpress or http://www.mycoolblog.com
+	 * No trailing slash please */
+	 
+$ziptheme['enable_report'] = 1;
+	/* Enable output of zipfile instead of downloading it
+	 * Calling yourtheme.zip.php?list=1 will display content of zipfile instead of
+	 * sending zip archive to browser.
+	 * I'm not sure why anybody would want to set it to 0 to disable it but well,
+	 * the option is here anyway :) */
+
+$ziptheme['enable_file_preview'] = 1;
+	/* Enable preview feature for files contained in the zip
+	 * Needs $ziptheme['enable_report'] to be set to 1 */
+	 
+$ziptheme['textfiles'] = array('txt', 'php', 'css', 'html', 'htm', 'js', 'xml');
+	/* Array of file extensions that can safely be displayed as text within browser window */
+
+$ziptheme['imagefiles'] = array('gif','jpg','png');
+	/* Array of file extensions that will be displayed as images in browser window */
+	 
+	 
+/**************************************
+ * DO NOT EDIT ANYTHING BELOW         *
+ **************************************/
+
+require($ziptheme['path_to_zipclass']);
+
+$ziptheme['action']='zip';
+if ($ziptheme['enable_report'] and @$_GET['list']) $ziptheme['action'] = 'list';
+if (@$_GET['view']) {
+	if ($ziptheme['enable_report'] and $ziptheme['enable_file_preview']) {
+		$ziptheme['action'] = 'view';
+	} elseif ($ziptheme['enable_report']) {
+		$ziptheme['action'] = 'list';
+	}
+}
+		
+$zip= new ss_zip('',9);
+$suffix = '';
+$zippit = list_directory($ziptheme['rootdir'] . '/' . $ziptheme['theme_name']);
+
+// What do do now ?
+switch ($ziptheme['action']) {
+
+// Display archive content
+case 'list' :
+	$lastmod = array_pop($zippit);
+	if ($ziptheme['datesuffix']) $suffix = '-' . date($ziptheme['datesuffix'],$lastmod);
+	$infos = array_pop($zippit);
+
+	// Prepare zip file ...
+	foreach ($zippit as $item) {
+		$file = substr($item,strlen($ziptheme['rootdir'] . '/' . $ziptheme['theme_name'])+1);
+		$zip->add_file($item, "${ziptheme['theme_name']}/$file");
+	}
+	// ... just to get its size ...
+	$zipsize=number_format(strlen($zip->archive())/1024,2,'.',',');
+	// ... then free memory
+	$zip->clear();
+	
+	print_header("Content of Wordpress Theme archive: ${ziptheme['theme_name']}${suffix}.zip",'table');
+
+	// No, I will not use PHP_SELF.
+	$script = substr($_SERVER["REQUEST_URI"],0,strpos($_SERVER["REQUEST_URI"],'?'));
+
+	print "<h1>Content of <a href='$script'>${ziptheme['theme_name']}${suffix}.zip</a> ($zipsize kb)</h1>\n";
+	
+	print <<<TABLEHEAD
+	<table border="0">
+	<thead><tr>
+		<th><a href="#sort" onclick="this.blur();return sortTable('zipfile', 0)" title="Click to Sort by Filename">Filename</a></th>
+		<th><a href="#sort" onclick="this.blur();return sortTable('zipfile', 1)" title="Click to Sort by Size">Size</a></th>
+		<th><a href="#sort" onclick="this.blur();return sortTable('zipfile', 2)" title="Click to Sort by Modified">Modified</a></th>
+		<th><a href="#sort" onclick="this.blur();return sortTable('zipfile', 3)" title="Click to Sort by Path">Path</a></th>
+	</tr></thead>
+	<tbody  id="zipfile">
+TABLEHEAD;
+
+	$style='odd';
+	$totalsize=0;
+	foreach ($zippit as $k=>$v) {
+		$file = substr($zippit[$k],strlen($ziptheme['rootdir'] . '/' . $ziptheme['theme_name'])+1);
+		$path = '';
+		if (strpos($file,'/')) {
+			$path = substr($file,0,strrpos($file,'/')).'/';
+			$file = substr($file,strrpos($file,'/')+1);
+		}
+		$size = $infos[$k]['size'];
+		$totalsize += $size;
+		$umodified = max($infos[$k]['mtime'],$infos[$k]['ctime']);
+		$modified = date('Y/m/d H:i:s', $umodified);
+		$style = ($style == 'odd')?'even':'odd';
+		if ($ziptheme['enable_file_preview']) {
+			$html="<a href='$script?view=${path}${file}' title='view $file'>$file</a>";
+		} else {
+			$html="$file";
+		}
+		print "<tr class='$style'><td>$html</td><td align='right'>$size</td><td><span style='display:none'>$umodified</span> $modified</td><td>${ziptheme['theme_name']}/$path</td></tr>\n";
+	}
+	print '</tbody></table>';
+	print '<p>Zip file contains <b>'.count($zippit) . '</b> files (<b>'. number_format($totalsize/1024,2,'.',',')."</b> kb uncompressed &rarr; <b>$zipsize</b> kb compressed)</p>\n";
+	print '<p>Zip file last modified on <b>' . date('Y/m/d H:i:s',$lastmod).'</b>';
+	print_footer();
+	break;
+
+// Display file content
+case 'view' :
+	$viewfile = @$_GET['view'];
+	print_header("Content: $viewfile &laquo; Wordpress Theme: ${ziptheme['theme_name']}",'li');
+
+	$lastmod = array_pop($zippit);
+	if ($ziptheme['datesuffix']) $suffix = '-' . date($ziptheme['datesuffix'],$lastmod);
+
+	$script = substr($_SERVER["REQUEST_URI"],0,strpos($_SERVER["REQUEST_URI"],'?'));
+
+	print "<h1>Content of $viewfile from <a href='$script?list=1'>${ziptheme['theme_name']}${suffix}.zip</a></h1>\n";
+	print '<span id="ol2ul"><a href="javascript:ol2ul(1)">without</a> / <a href="javascript:ol2ul(0)">with</a> line numbers</span>';
+
+	$found = 0;
+	foreach ($zippit as $item) {
+		$file = substr($item,strlen($ziptheme['rootdir'] . '/' . $ziptheme['theme_name'])+1);
+		if ($file == $viewfile) {
+			$found = print_content($item);
+			break;
+		}
+	}
+	if ($found == 1) {
+		print "<p>Return to listing of <a href='$script?list=1'>${ziptheme['theme_name']}${suffix}.zip</a></p>";
+	} else {
+		print "<p>File <b>$viewfile</b> is not part of <a href='$script?list=1'>${ziptheme['theme_name']}${suffix}.zip</a> !</p>";
+	}
+	
+	print_footer();
+	break;
+	
+// Create zip archive and send to browser
+case 'zip' :
+	$lastmod = array_pop($zippit);
+	if ($ziptheme['datesuffix']) $suffix = '-' . date($ziptheme['datesuffix'],$lastmod);
+
+	foreach ($zippit as $item) {
+		$file = substr($item,strlen($ziptheme['rootdir'] . '/' . $ziptheme['theme_name'])+1);
+		$zip->add_file($item, "${ziptheme['theme_name']}/$file");
+	}
+	// Incoming Quadded Zipfile ! Secure Browser & Escort Flag Carrier !
+	header('Content-Type: application/x-zip');
+	header("Content-Type: application/force-download"); 
+	header("Content-Transfer-Encoding: binary");
+	// >>> Incoming Low <<<
+	$zip->save($ziptheme['theme_name'].$suffix.'.zip','b'); 
+	break;
+}
+
+/**************************** That's it folks. ***************************/
+
+// Functions :
+
+// Super neato cool function to go through a dir and subdirs found in comments of php.net/readdir
+// What is very good about it is that this function makes no recursive call to itself -> $speed++ !
+// More info here : http://frenchfragfactory.net/ozh/archives/2005/12/22/php-non-recursive-function-through-directories/
+function list_directory($dir) {
+	global $ziptheme;
+	if (substr($dir,strlen($dir)-1,1) == '/') $dir = substr($dir,0,strlen($dir)-1);
+	$file_list = array();
+	$info_list = array();
+	$lastmod=0;
+	$stack[] = $dir;
+	while ($stack) {
+		$current_dir = array_pop($stack);
+		if ($dh = opendir($current_dir)) {
+			while (($file = readdir($dh)) !== false) {
+				if ($file !== '.' AND $file !== '..') {
+					$current_file = "{$current_dir}/{$file}";
+					if (is_file($current_file)) {
+						$file_list[] = "{$current_dir}/{$file}";
+						//if ($ziptheme['datesuffix'] or $ziptheme['action'] == 'list') {
+							clearstatcache();
+							$infos=stat("{$current_dir}/{$file}");
+							$lastmod = max($lastmod, $infos['mtime'],$infos['ctime']); // Ok I admit I just don't understand the difference between these 2 from my tests on a Windows and a Linux platform :)
+							if ($ziptheme['action'] == 'list') $info_list[]=$infos;
+						//}
+					} elseif (is_dir($current_file)) {
+						$stack[] = $current_file;
+					}
+				}
+			}
+		}
+	}
+	if ($ziptheme['action'] == 'list') $file_list[] = $info_list;
+	//if ($ziptheme['datesuffix'])
+	$file_list[] = $lastmod;
+	// So, what do we have now ?
+	//   An array with all the file (physical path)
+	// + an entry that contains an array of infos about all these files (used to get size etc...)
+	// + an entry that contains date of last modification
+	return $file_list;
+}
+
+// Print headers and some HTML
+function print_header($name='',$js='') {
+	header("Cache-Control: no-cache, must-revalidate"); // HTTP/1.1
+	header("Pragma:no-cache"); // HTTP//1.0
+	print "<html>\n<head>\n<title>$name</title>\n";
+	switch ($js) {
+		case 'table':
+			print_js_table();
+			break;
+		case 'li':
+			print_js_li();
+			break;
+	}
+	print_css();
+	print "\n</head>\n<body>\n";
+}
+
+// Print some HTML for footer
+// If you find this script useful, please don't remove the credit link so that other people
+// will try it and hopefully find it cool too. This free script is linkware :)
+function print_footer() {
+	global $ziptheme;
+	print "<hr>\n<!--<script>ol2ul(1)</script>-->";
+	print "<p id='footer'><span id='blog'>&laquo; Return to <a href='${ziptheme['theme_page']}'>Theme Page</a></span><span id='ozh'><a href='http://frenchfragfactory.net/ozh/my-projects/wordpress-theme-zip/' title='Wordpress Theme Zip : Generate zipfile and listings from your Theme files'>Wordpress Theme Zip</a> by <a href='http://frenchfragfactory.net/ozh/'>Ozh</a></span></p>\n";
+	print "</body>\n</html>\n";
+}
+
+// Print content of file : as text, as image, or as nothing.
+function print_content($file) {
+	global $ziptheme;
+	
+	$ext = substr($file,strrpos($file,'.')+1);
+	
+	if (in_array($ext,$ziptheme['textfiles'])) {
+		$content = file($file);
+		$style='odd';
+		print "<ol id='filecontent'>\n";
+		foreach($content as $line) {
+			$style = ($style == 'odd')?'even':'odd';
+			print "<li class='$style'>";
+			highlight_string($line);
+			print "</li>\n";
+		}
+		print "&nbsp;</ol>\n";
+	} elseif (in_array($ext,$ziptheme['imagefiles'])) {
+		$file = substr($file,strlen($ziptheme['rootdir'] . '/' . $ziptheme['theme_name'])+1);
+		print "<p><img src='${ziptheme['rooturl']}/wp-content/themes/${ziptheme['theme_name']}/$file' alt='$file'></p>";
+	} else {
+		print "<p>Cannot display file content in your web browser</p>\n";
+	}
+	return 1;
+}
+
+// Print tiny Javascript code to switch from <ol> to <ul> when
+// viewing a file content
+function print_js_li() {
+print <<<JSLI
+<script type="text/javascript">//<![CDATA[
+function ol2ul(hide) {
+	var lst = 'none';
+	if (hide ==0) {lst = 'decimal';}
+	ol=document.getElementById('filecontent');
+	ol.style.listStyleType=lst;
+}
+//]]></script>
+
+JSLI;
+}
+
+// Print Javascript code to make table sortable
+// Can't remember where I got this from. Probably from
+// http://www.brainjar.com/dhtml/tablesort/demo.html but I'm not sure.
+// Pretty cool anyway :)
+function print_js_table() {
+print <<<JS
+<script type="text/javascript">//<![CDATA[
+function sortTable(id, col) {
+
+  // Get the table section to sort.
+  var tblEl = document.getElementById(id);
+
+  // Set up an array of reverse sort flags, if not done already.
+  if (tblEl.reverseSort == null)
+    tblEl.reverseSort = new Array();
+
+  // If this column was the last one sorted, reverse its sort direction.
+  if (col == tblEl.lastColumn)
+    tblEl.reverseSort[col] = !tblEl.reverseSort[col];
+
+  // Remember this column as the last one sorted.
+  tblEl.lastColumn = col;
+
+  // Set the table display style to "none" - necessary for Netscape 6 
+  // browsers.
+  var oldDsply = tblEl.style.display;
+  tblEl.style.display = "none";
+
+  // Sort the rows based on the content of the specified column using a
+  // selection sort.
+
+  var tmpEl;
+  var i, j;
+  var minVal, minIdx;
+  var testVal;
+  var cmp;
+
+  for (i = 0; i < tblEl.rows.length - 1; i++) {
+
+    // Assume the current row has the minimum value.
+    minIdx = i;
+    minVal = getTextValue(tblEl.rows[i].cells[col]);
+
+    // Search the rows that follow the current one for a smaller value.
+    for (j = i + 1; j < tblEl.rows.length; j++) {
+      testVal = getTextValue(tblEl.rows[j].cells[col]);
+      cmp = compareValues(minVal, testVal);
+      // Reverse order?
+      if (tblEl.reverseSort[col])
+        cmp = -cmp;
+      // If this row has a smaller value than the current minimum, remember its
+      // position and update the current minimum value.
+      if (cmp > 0) {
+        minIdx = j;
+        minVal = testVal;
+      }
+    }
+
+    // By now, we have the row with the smallest value. Remove it from the
+    // table and insert it before the current row.
+    if (minIdx > i) {
+      tmpEl = tblEl.removeChild(tblEl.rows[minIdx]);
+      tblEl.insertBefore(tmpEl, tblEl.rows[i]);
+    }
+  }
+
+  // Restore the table's display style.
+  tblEl.style.display = oldDsply;
+
+  // Make it look pretty.
+  makePretty(tblEl, col);
+  
+  return false;
+}
+
+//-----------------------------------------------------------------------------
+// Functions to get and compare values during a sort.
+//-----------------------------------------------------------------------------
+
+// This code is necessary for browsers that don't reflect the DOM constants
+// (like IE).
+if (document.ELEMENT_NODE == null) {
+  document.ELEMENT_NODE = 1;
+  document.TEXT_NODE = 3;
+}
+
+function getTextValue(el) {
+
+  var i;
+  var s;
+
+  // Find and concatenate the values of all text nodes contained within the
+  // element.
+  s = "";
+  for (i = 0; i < el.childNodes.length; i++)
+    if (el.childNodes[i].nodeType == document.TEXT_NODE)
+      s += el.childNodes[i].nodeValue;
+    else if (el.childNodes[i].nodeType == document.ELEMENT_NODE &&
+             el.childNodes[i].tagName == "BR")
+      s += " ";
+    else
+      // Use recursion to get text within sub-elements.
+      s += getTextValue(el.childNodes[i]);
+
+  return normalizeString(s);
+}
+
+function compareValues(v1, v2) {
+
+  var f1, f2;
+
+  // If the values are numeric, convert them to floats.
+
+  f1 = parseFloat(v1);
+  f2 = parseFloat(v2);
+  if (!isNaN(f1) && !isNaN(f2)) {
+    v1 = f1;
+    v2 = f2;
+  }
+
+  // Compare the two values.
+  if (v1 == v2)
+    return 0;
+  if (v1 > v2)
+    return 1
+  return -1;
+}
+
+// Regular expressions for normalizing white space.
+var whtSpEnds = new RegExp("^\s*|\s*$", "g");
+var whtSpMult = new RegExp("\s\s+", "g");
+
+function normalizeString(s) {
+
+  s = s.replace(whtSpMult, " ");  // Collapse any multiple whites space.
+  s = s.replace(whtSpEnds, "");   // Remove leading or trailing white space.
+
+  return s;
+}
+
+// Style class names.
+var rowClsNm = "odd";
+var colClsNm = "sorted";
+
+// Regular expressions for setting class names.
+var rowTest = new RegExp(rowClsNm, "gi");
+var colTest = new RegExp(colClsNm, "gi");
+
+
+function makePretty(tblEl, col) {
+
+  var i, j;
+  var rowEl, cellEl;
+
+  // Set style classes on each row to alternate their appearance.
+  for (i = 0; i < tblEl.rows.length; i++) {
+   rowEl = tblEl.rows[i];
+   rowEl.className = rowEl.className.replace(rowTest, "");
+    if (i % 2 != 0)
+      rowEl.className += " " + rowClsNm;
+    rowEl.className = normalizeString(rowEl.className);
+    // Set style classes on each column (other than the name column) to
+    // highlight the one that was sorted.
+    for (j = 0; j < tblEl.rows[i].cells.length; j++) {
+      cellEl = rowEl.cells[j];
+      cellEl.className = cellEl.className.replace(colTest, "");
+      if (j == col)
+        cellEl.className += " " + colClsNm;
+      cellEl.className = normalizeString(cellEl.className);
+    }
+  }
+
+  // Find the table header and highlight the column that was sorted.
+  var el = tblEl.parentNode.tHead;
+  rowEl = el.rows[el.rows.length - 1];
+  // Set style classes for each column as above.
+  for (i = 0; i < rowEl.cells.length; i++) {
+    cellEl = rowEl.cells[i];
+    cellEl.className = cellEl.className.replace(colTest, "");
+    // Highlight the header of the sorted column.
+    if (i == col)
+      cellEl.className += " " + colClsNm;
+      cellEl.className = normalizeString(cellEl.className);
+  }
+}
+
+//]]></script>
+JS;
+}
+
+
+// Print some CSS style. Customize this to suit your needs and likes.
+function print_css() {
+print <<<CSS
+<style>
+td,th,body,table,h1	{
+	whitespace: pre;
+	font-family:monospace;
+	font-size:1em;
+}
+
+hr {
+	margin-top:1.5em;
+	color: #ccc;
+	background-color: #bbf;
+	height: 2px;
+}
+
+#footer {
+	margin:0;
+	font-size:75%;
+}
+
+#blog {
+	float:left;
+}
+
+#ozh {
+	float:right;
+}
+
+a, a:visited {
+	color:#009;
+}
+
+a:hover,a:active {
+	color:#0055ff;
+}
+
+tr td a {
+	text-decoration:none;
+}
+
+tr td a:hover {
+	text-decoration:underline;
+}
+
+#zipfile th {
+	text-align:center;
+	background-color: #eee;
+}
+
+#zipfile td {
+	padding: 0 1em;
+}
+
+td .sorted {
+	display:none;
+	color:#088;
+	font-weight:bold;
+}
+
+#zipfile tr.odd, #zipfile tr.odd td.sorted, #zipfile tr th {
+	background-color: #eee;
+	margin:20px;
+}
+
+.odd {
+	background-color: #eee;
+}
+
+#zipfile tr:hover, #zipfile td:hover {
+	background: #bbf;
+}
+
+#ol2ul {float:right;font-size:75%;background: #eee}
+
+#filecontent {clear:right;}
+
+</style>
+CSS;
+}
+
+
+?>
